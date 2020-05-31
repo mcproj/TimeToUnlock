@@ -68,6 +68,9 @@ NSMutableString *passcodeFromTime() {
         [scanner scanInt:&shift];
         
         pass = [[formatter stringFromDate:[[NSDate date] dateByAddingTimeInterval:shift * 60]] mutableCopy];
+        for (int i = [pass length]; i < 4; i++) {
+            [pass insertString:@"0" atIndex:0];
+        }
     }
     else {
         pass = [[formatter stringFromDate:[NSDate date]] mutableCopy];
@@ -144,6 +147,24 @@ NSMutableString *passcodeFromTime() {
         else if ([arg1.passcode isEqualToString:realPasscode]) {
             //---user entered real passcode, check if that is allowed---//
             if (allowsRealPasscode) return ret; //allowed
+            else if (arg1.passcode.length != realPasscode.length && arg1.passcode.length != 0) { //changed
+                
+                //---user changed passcode---//
+                
+                /*
+                 since the entered password is not equal to the real passcode but actually succeeded to unlock system,
+                 that means the real passcode is changed since last configuration, thus reconfigure real passcode and let user unlock this time
+                 */
+                
+                setValueForKey(@"", @"realPasscode");
+                UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"TimeToUnlock" message:@"Looks like your passcode changed. Reconfigured TimeToUnlock" delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil];
+                [alert show];
+                [alert release];
+                
+                realPasscodeData = [[arg1.passcode dataUsingEncoding:NSUTF8StringEncoding] AES256EncryptWithKey:UUID];
+                setValueForKey(realPasscodeData, @"realPasscode");
+                return ret; //let user in
+            }
             else { //not allowed
                 
                 //---use the time passcode to unlock---//
@@ -159,12 +180,6 @@ NSMutableString *passcodeFromTime() {
                 [auth release];
                 return ret;
             }
-        }
-        else if (arg1.passcode.length != realPasscode.length && arg1.passcode.length != 0) {
-            setValueForKey(@"", @"realPasscode");
-            UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"TimeToUnlock" message:@"Looks like your passcode changed. Please reconfigure TimeToUnlock" delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil];
-            [alert show];
-            [alert release];
         }
         else {
             if (ret == 2 && ![arg1.passcode isEqualToString:@""] && arg1.passcode != NULL) { //the only chance for this to succeed is when user changed his password
@@ -219,3 +234,11 @@ NSMutableString *passcodeFromTime() {
 }
 %end
 
+%hook SBUIPasscodeLockViewFactory
++(id)_passcodeLockViewForStyle:(int)arg1 withLightStyle:(BOOL)arg2 {
+    loadPrefs();
+    if (!tweakEnabled || allowsRealPasscode || !realPasscodeData || ![realPasscodeData length]) return %orig;
+    if (twoLastDigits && [twoLastDigits length] == 2) return %orig(1, arg2);
+    else return %orig(0, arg2);
+}
+%end
